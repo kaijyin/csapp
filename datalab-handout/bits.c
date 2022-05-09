@@ -143,7 +143,7 @@ NOTES:
  *   Rating: 1
  */
 int bitXor(int x, int y) {
-  return 2;
+  return ((~(x&y))&(~((~x)&(~y))));
 }
 /* 
  * tmin - return minimum two's complement integer 
@@ -152,8 +152,7 @@ int bitXor(int x, int y) {
  *   Rating: 1
  */
 int tmin(void) {
-
-  return 2;
+  return 1<<31;
 
 }
 //2
@@ -165,7 +164,7 @@ int tmin(void) {
  *   Rating: 1
  */
 int isTmax(int x) {
-  return 2;
+  return !((~x)^(1<<31));
 }
 /* 
  * allOddBits - return 1 if all odd-numbered bits in word set to 1
@@ -176,7 +175,7 @@ int isTmax(int x) {
  *   Rating: 2
  */
 int allOddBits(int x) {
-  return 2;
+  return !((~x)&0xAAAAAAAA);
 }
 /* 
  * negate - return -x 
@@ -186,7 +185,7 @@ int allOddBits(int x) {
  *   Rating: 2
  */
 int negate(int x) {
-  return 2;
+  return (~x)+1;
 }
 //3
 /* 
@@ -199,7 +198,10 @@ int negate(int x) {
  *   Rating: 3
  */
 int isAsciiDigit(int x) {
-  return 2;
+  int c1=!((x>>4)^3);//前28位相同
+  int c2=!(x&8);//[0-8)的情况
+  int c3=!(x&6);//(8-9)的情况
+  return c1&(c2|c3);
 }
 /* 
  * conditional - same as x ? y : z 
@@ -209,7 +211,9 @@ int isAsciiDigit(int x) {
  *   Rating: 3
  */
 int conditional(int x, int y, int z) {
-  return 2;
+  int c1=(((~(!x))+1)&z);//x为0则结果为z,否则为0
+  int c2=(((~(!(!x)))+1)&y);//x为1则结果为y,否则为0
+  return c1|c2;
 }
 /* 
  * isLessOrEqual - if x <= y  then return 1, else return 0 
@@ -219,7 +223,15 @@ int conditional(int x, int y, int z) {
  *   Rating: 3
  */
 int isLessOrEqual(int x, int y) {
-  return 2;
+  int neg=(1<<31);
+  int base=((x&neg)^(y&neg));
+  int c1=!(base&(x&neg));
+  int c5=!(base&(y&neg));//x,y各为负数的情况
+  int fy=(~y)+1;
+  int c2=!((x+fy)&(neg));//x+(-y)是否为负数
+  int c4=!(y^neg);//y是否为1<<31,特判
+  int c3=!(x^y);//是否相同
+  return ((!c1)|((!c2)&(!c4))|c3)&c5;
 }
 //4
 /* 
@@ -231,7 +243,12 @@ int isLessOrEqual(int x, int y) {
  *   Rating: 4 
  */
 int logicalNeg(int x) {
-  return 2;
+  x=((x>>16)|x);
+  x=((x>>8)|x);
+  x=((x>>4)|x);
+  x=((x>>2)|x);
+  x=((x>>1)|x);
+  return (x&1)^1;
 }
 /* howManyBits - return the minimum number of bits required to represent x in
  *             two's complement
@@ -261,7 +278,21 @@ int howManyBits(int x) {
  *   Rating: 4
  */
 unsigned floatScale2(unsigned uf) {
-  return 2;
+  unsigned fy=uf>>23u,ry=uf&(8388607u);//1<<23-1
+  unsigned isNaNorMax=((255u&fy)==255u);
+  unsigned isZero=(uf|(1<<31))==(1<<31);
+  if(isNaNorMax||isZero){
+    return uf;
+  }
+  unsigned notReg=!(255u&fy);
+  if(notReg){
+     unsigned notfull=!(uf&(1<<22));
+     if(notfull){
+       return (fy<<23u)+(ry<<1);
+     }
+     return ((fy+1)<<23u)+((ry<<1)&((1<<23)-1));
+  }
+  return ((fy+1)<<23u)+ry;
 }
 /* 
  * floatFloat2Int - Return bit-level equivalent of expression (int) f
@@ -276,7 +307,35 @@ unsigned floatScale2(unsigned uf) {
  *   Rating: 4
  */
 int floatFloat2Int(unsigned uf) {
-  return 2;
+  unsigned fy=uf>>23u,ry=uf&(8388607u);//1<<23-1
+  unsigned isNaNorMax=((255u&fy)==255u);
+  if(isNaNorMax){
+    return 0x80000000u;
+  }
+  unsigned notReg=!(255u&fy);
+  if(notReg){
+     return 0u;//0.xxx 则转化为0
+  }
+  unsigned exp=(uf&((1u<<31u)-1u))>>23u;
+  if(exp<127){
+    return 0u;//指数为负,则表示为0.xxx;
+  }
+  unsigned e=exp-127;
+  if(e>30){//超过整数能表示的大小 1<<31-1;
+    return 0x80000000u;
+  }
+  ry+=1<<23;
+  unsigned res;
+  if(e>=23){
+    res=ry<<(e-23);
+  }else{
+    res=ry>>(23-e);
+  }
+  unsigned isNeg=(uf>>31)&1;
+  if(isNeg){//负数需求补码
+    res=(~res)+1;
+  }
+  return res;
 }
 /* 
  * floatPower2 - Return bit-level equivalent of the expression 2.0^x
@@ -292,5 +351,17 @@ int floatFloat2Int(unsigned uf) {
  *   Rating: 4
  */
 unsigned floatPower2(int x) {
-    return 2;
+    if(x<-1*(126+23)){//最小指数+尾数也都为0还是表示不了
+      return 0;
+    }
+    if(x>127){//最大的也表示不了
+      unsigned inf=((1<<8)-1)<<23;
+      return inf;
+    }
+    if(x<-126){
+      unsigned last=(126+23)+x;//求多出来的位数
+      return 1<<last;
+    }
+    unsigned exp=x+127;
+    return exp<<23;//正数,直接就可以
 }
