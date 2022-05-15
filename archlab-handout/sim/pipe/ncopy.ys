@@ -67,6 +67,7 @@ fwd:
 last:
 	rrmovq %rax,%rcx
     mrmovq (%rdi),%r8
+	iaddq $1,%rcx
 	andq %r8,%r8
 	cmovg %rcx,%rax
 	rmmovq %r8,(%rsi)
