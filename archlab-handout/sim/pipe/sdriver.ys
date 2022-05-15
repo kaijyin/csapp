@@ -31,21 +31,63 @@ ncopy:
 	# Loop header
 	xorq %rax,%rax		# count = 0;
 	andq %rdx,%rdx		# len <= 0?
-	jle Done		# if so, goto Done:
+	jle Done		    # if so, goto Done:
+	iaddq $-6,%rdx      # len < 6 ?
+	jle fwd		        # if so, goto loop:
+loop:
+    mrmovq (%rdi),%r8
+	mrmovq 0x8(%rdi),%r9
+	rmmovq %r8,(%rsi)
+	andq %r8,%r8
+	rmmovq %r9,0x8(%rsi)
+	jle n1
+	iaddq $1,%rax
+n1:
+    mrmovq 0x10(%rdi),%r10
+    andq %r9,%r9
+	mrmovq 0x18(%rdi),%r11
+	jle n2
+	iaddq $1,%rax
+n2:
+	rmmovq %r10,0x10(%rsi)
+	andq %r10,%r10
+	rmmovq %r11,0x18(%rsi)
+	jle n3
+	iaddq $1,%rax
+n3:
+    mrmovq 0x20(%rdi),%r8
+    andq %r11,%r11
+	mrmovq 0x28(%rdi),%r9
+	jle n4
+	iaddq $1,%rax
+n4:
+    rmmovq %r8,0x20(%rsi)
+	andq %r8,%r8
+	rmmovq %r9,0x28(%rsi)
+	jle n5
+	iaddq $1,%rax
+n5:
+    andq %r9,%r9
+	jle n6
+	iaddq $1,%rax
+n6:
+    iaddq $0x30,%rdi
+    iaddq $0x30,%rsi
+    iaddq $-6,%rdx
+	jg loop
+fwd:
+	iaddq $6,%rdx
+last:
+	rrmovq %rax,%rcx
+    mrmovq (%rdi),%r8
+	andq %r8,%r8
+	cmovg %rcx,%rax
+	rmmovq %r8,(%rsi)
 
-Loop:	mrmovq (%rdi), %r10	# read val from src...
-	rmmovq %r10, (%rsi)	# ...and store it to dst
-	andq %r10, %r10		# val <= 0?
-	jle Npos		# if so, goto Npos:
-	irmovq $1, %r10
-	addq %r10, %rax		# count++
-Npos:	irmovq $1, %r10
-	subq %r10, %rdx		# len--
-	irmovq $8, %r10
-	addq %r10, %rdi		# src++
-	addq %r10, %rsi		# dst++
-	andq %rdx,%rdx		# len > 0?
-	jg Loop			# if so, goto Loop:
+    iaddq $8,%rdi
+    iaddq $8,%rsi
+	iaddq $-1,%rdx
+    jg last
 ##################################################################
 # Do not modify the following section of code
 # Function epilogue.
@@ -62,9 +104,9 @@ EndFun:
 ###############################
 	.align 8
 src:
-	.quad 1
+	.quad -1
 	.quad 2
-	.quad -3
+	.quad 3
 	.quad -4
 	.quad 0xbcdefa # This shouldn't get moved
 

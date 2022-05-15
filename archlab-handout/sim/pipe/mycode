@@ -16,48 +16,63 @@ ncopy:
 ##################################################################
 # You can modify this portion
 	# Loop header
+	pushq %rbx
+	pushq %rbp
+    pushq %r12
+	pushq %r13
+	pushq %r14
+	irmovq $1,%rbx
 	xorq %rax,%rax		# count = 0;
 	andq %rdx,%rdx		# len <= 0?
 	jle Done		    # if so, goto Done:
-	iaddq $-6,%rdx      # len < 6 ?
+	iaddq $-6,%rdx      # len < 8 ?
 	jle fwd		        # if so, goto loop:
 loop:
     mrmovq (%rdi),%r8
 	mrmovq 0x8(%rdi),%r9
-	rmmovq %r8,(%rsi)
-	andq %r8,%r8
-	rmmovq %r9,0x8(%rsi)
-	jle n1
-	iaddq $1,%rax
-n1:
-    mrmovq 0x10(%rdi),%r10
-    andq %r9,%r9
+	mrmovq 0x10(%rdi),%r10
 	mrmovq 0x18(%rdi),%r11
-	jle n2
-	iaddq $1,%rax
-n2:
+	mrmovq 0x20(%rdi),%r12
+	mrmovq 0x28(%rdi),%r13
+
+
+	rmmovq %r8,(%rsi)
+	rmmovq %r9,0x8(%rsi)
 	rmmovq %r10,0x10(%rsi)
-	andq %r10,%r10
 	rmmovq %r11,0x18(%rsi)
-	jle n3
-	iaddq $1,%rax
-n3:
-    mrmovq 0x20(%rdi),%r8
-    andq %r11,%r11
-	mrmovq 0x28(%rdi),%r9
-	jle n4
-	iaddq $1,%rax
-n4:
-    rmmovq %r8,0x20(%rsi)
+	rmmovq %r12,0x20(%rsi)
+	rmmovq %r13,0x28(%rsi)
+    
+	rrmovq %rax,%rcx
+	iaddq $1,%rcx
 	andq %r8,%r8
-	rmmovq %r9,0x28(%rsi)
-	jle n5
-	iaddq $1,%rax
-n5:
-    andq %r9,%r9
-	jle n6
-	iaddq $1,%rax
-n6:
+	cmovg %rcx,%rax
+
+	rrmovq %rax,%rcx
+	iaddq $1,%rcx
+	andq %r9,%r9
+	cmovg %rcx,%rax
+
+	rrmovq %rax,%rcx
+	iaddq $1,%rcx
+	andq %r10,%r10
+	cmovg %rcx,%rax
+
+	rrmovq %rax,%rcx
+	iaddq $1,%rcx
+	andq %r11,%r11
+	cmovg %rcx,%rax
+
+	rrmovq %rax,%rcx
+	iaddq $1,%rcx
+	andq %r12,%r12
+	cmovg %rcx,%rax
+
+	rrmovq %rax,%rcx
+	iaddq $1,%rcx
+	andq %r13,%r13
+	cmovg %rcx,%rax
+
     iaddq $0x30,%rdi
     iaddq $0x30,%rsi
     iaddq $-6,%rdx
@@ -65,11 +80,13 @@ n6:
 fwd:
 	iaddq $6,%rdx
 last:
-	rrmovq %rax,%rcx
     mrmovq (%rdi),%r8
+	rmmovq %r8,(%rsi)
+
+	rrmovq %rax,%rcx
+	iaddq $1,%rcx
 	andq %r8,%r8
 	cmovg %rcx,%rax
-	rmmovq %r8,(%rsi)
 
     iaddq $8,%rdi
     iaddq $8,%rsi
@@ -79,6 +96,11 @@ last:
 # Do not modify the following section of code
 # Function epilogue.
 Done:
+    popq %r14
+    popq %r13
+    popq %r12
+    popq %rbp
+    popq %rbx
 	ret
 ##################################################################
 # Keep the following label at the end of your function
