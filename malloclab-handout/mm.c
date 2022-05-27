@@ -60,21 +60,24 @@ team_t team = {
 #define GET_SIZE(p) (GET(p) & ~0x7)
 #define GET_ALLOC(p) (GET(p) & 0x1)
 
-#define HDRP(bp) ((char *)(bp) - WSIZE)
-#define FTRP(bp) ((char *)(bp) + GET_SIZE(HDRP(bp) - DSIZE))
 
+#define HDRP(bp) ((char *)(bp) - WSIZE)
+#define FTRP(bp) ((char *)(bp) + GET_SIZE(HDRP(bp)) - DSIZE)
+  
 #define NEXT_BLKP(bp) ((char*)(bp) + GET_SIZE(((char *)(bp) - WSIZE)))
 #define PREV_BLKP(bp) ((char*)(bp) - GET_SIZE(((char *)(bp) - DSIZE)))
+
 void *heap_listp;
 static void *extend_heap(size_t words);
+
 static void *coalesce(void *bp);
 static void *find_fit(size_t size);
-static void place(void *bp,size_t size);
+static void place(void *bp,size_t size,size_t alloc);
 /* 
  * mm_init - initialize the malloc package.
  */
 int mm_init(void){  
-    if((heap_listp=mem_sbrk(4*WSIZE))==(void *)-1){
+    if((heap_listp=mem_sbrk(4*WSIZE)) == (void *)-1){
         return -1;
     }
     PUT(heap_listp,0);
@@ -86,6 +89,7 @@ int mm_init(void){
     //先预分配空闲块
     if(extend_heap(CHUNKSIZE/WSIZE)==NULL)
       return -1;
+    // printf("initok\n");
     return 0;
 }
 /*扩展堆大小*/
@@ -97,14 +101,11 @@ static void * extend_heap(size_t words){
     size=(words%2)?(words+1)*WSIZE:words*WSIZE;
     if((long)(bp=mem_sbrk(size))==-1)
       return NULL;
-    
     //设置新块flag,原本的结尾块作为新块的HD块
-    PUT(HDRP(bp),PACK(size,0));
-    PUT(FTRP(bp),PACK(size,0));
-
+    place(bp,size,0);
     //添加新的结尾块
     PUT(HDRP(NEXT_BLKP(bp)),PACK(0,1));
-
+    // printf("\n cur last block %p\n",NEXT_BLKP(bp));
     return coalesce(bp);
 }
 
@@ -126,33 +127,57 @@ void *mm_malloc(size_t size)
     }else{
         asize=DSIZE*((size+(DSIZE)+(DSIZE-1))/DSIZE);
     }
+    // printf("alloc %d\n",asize);
     //找合适的空闲块
     if((bp=find_fit(asize))!=NULL){
-        place(bp,asize);
+        place(bp,asize,1);
         return bp;
     }
     //找不到就申请新块
     extendsize = MAX(asize,CHUNKSIZE);
     if(( bp = extend_heap(extendsize/WSIZE)) == NULL)
       return NULL;
-    place(bp,asize);
+    place(bp,asize,1);
     return bp;
 }
 
 static void* find_fit(size_t size){
+    // printf("\nget in find_fit\n");
     void *bp=heap_listp;
-    while(GET_ALLOC(bp)||((GET_SIZE(bp))<size)){
+    size_t cursize=GET_SIZE(HDRP(bp));
+    size_t alloced=GET_ALLOC(HDRP(bp));
+    while(alloced||cursize<size){
         bp=NEXT_BLKP(bp);
-        if(GET_SIZE(bp)==0){
-            return NULL;
+        cursize=GET_SIZE(HDRP(bp));
+        alloced=GET_ALLOC(HDRP(bp));
+        if(cursize==0){
+            bp=NULL;
+            break;
         }
+        // printf("cursize %d\n",cursize);
     }
-    return bp;
+    if(cursize>size){
+        place(((char*)bp)+size,cursize-size,0);
+    }
+    void *p=bp;
+    bp=heap_listp;
+    while(1){
+        cursize=GET_SIZE(HDRP(bp));
+        alloced=GET_ALLOC(HDRP(bp));
+        // printf("p %p cursize %d alloced:%d\n",(char *)bp,cursize,alloced);
+        if(cursize==0){
+            break;
+        }
+        bp=NEXT_BLKP(bp);
+    }
+    return p;
 }
 //set the free block been placed
-static void place(void *bp,size_t size){
-      PUT(HDRP(bp),PACK(size,1));
-      PUT(FTRP(bp),PACK(size,1));
+static void place(void *bp,size_t size,size_t alloc){
+      PUT(HDRP(bp),PACK(size,alloc));
+      PUT(FTRP(bp),PACK(size,alloc));
+    //   printf("\nplace %p size:%d alloc:%d\n",(char *)bp,size,alloc);
+    //   printf("\nsize:%d\n",GET_SIZE(FTRP(bp)));
 }
 /*
  * mm_free - Freeing a block does nothing.
@@ -161,6 +186,7 @@ void mm_free(void *bp)
 {
     size_t size=GET_SIZE(HDRP(bp));
 
+    // printf("\nfree %p size:%d\n",(char*)bp,size);
     PUT(HDRP(bp),PACK(size,0));
     PUT(FTRP(bp),PACK(size,0));
     coalesce(bp);
@@ -168,25 +194,34 @@ void mm_free(void *bp)
 static void*coalesce(void *bp){
     size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
     size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
+    void *prev_blkp=PREV_BLKP(bp);
+    void *next_blkp=NEXT_BLKP(bp);
+    // printf("coalesce pre a:%d, next_al:%d\n",prev_alloc,next_alloc);
+    // if(!prev_alloc){
+    //     printf("preblock %p\n",PREV_BLKP(bp));
+    // }
+    // if(!next_alloc){
+    //     printf("nextblock %p\n",NEXT_BLKP(bp));
+    // }
     size_t size = GET_SIZE(HDRP(bp));
     if(prev_alloc&&next_alloc){
         return bp;
     }
-    else if(!prev_alloc && !next_alloc){
-        size+=GET_SIZE(HDRP(NEXT_BLKP(bp)));
+    else if(prev_alloc && !next_alloc){
+        size+=GET_SIZE(HDRP(next_blkp));
         PUT(HDRP(bp),PACK(size,0));
-        PUT(FTRP(bp),PACK(size,0));
+        PUT(FTRP(prev_blkp),PACK(size,0));
     }
     else if(!prev_alloc && next_alloc){
         size+=GET_SIZE(HDRP(PREV_BLKP(bp)));
+        PUT(HDRP(prev_blkp),PACK(size,0));
         PUT(FTRP(bp),PACK(size,0));
-        PUT(FTRP(PREV_BLKP(bp)),PACK(size,0));
-        bp = PREV_BLKP(bp);
+        bp = prev_blkp;
     }
     else {
         size+=GET_SIZE(HDRP(PREV_BLKP(bp)))+GET_SIZE(FTRP(NEXT_BLKP(bp)));
-        PUT(HDRP(PREV_BLKP(bp)),PACK(size,0));
-        PUT(HDRP(NEXT_BLKP(bp)),PACK(size,0));
+        PUT(HDRP(prev_blkp),PACK(size,0));
+        PUT(FTRP(next_blkp),PACK(size,0));
         bp=PREV_BLKP(bp);
     }
     return bp;
@@ -204,7 +239,7 @@ void *mm_realloc(void *ptr, size_t size)
     newptr = mm_malloc(size);
     if (newptr == NULL)
       return NULL;
-    copySize = GET_SIZE((HDRP(oldptr)));
+    copySize = GET_SIZE((HDRP(oldptr)))-DSIZE;//只复制数据
     if (size < copySize)
       copySize = size;
     memcpy(newptr, oldptr, copySize);
