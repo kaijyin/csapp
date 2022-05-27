@@ -109,8 +109,7 @@ static void * extend_heap(size_t words){
     if((long)(bp=mem_sbrk(size))==-1)
       return NULL;
     //设置新块flag,原本的结尾块作为新块的Head,这里不要用place,不需要删除块
-    PUT(HDRP(bp),PACK(size,0));
-    PUT(FTRP(bp),PACK(size,0));
+    place(bp,size,0);
     //添加新的结尾块
     PUT(HDRP(NEXT_BLKP(bp)),PACK(0,1));
     //先合并,再插入
@@ -192,20 +191,6 @@ void *mm_malloc(size_t size)
     place(bp,asize,1);
     return bp;
 }
-
-static void print_freelist(){
-    void *bp=free_listp;
-    printf("------------------free_list--------------------\n");
-    size_t cursize;
-    int mx=5;
-    while(bp!=NULL&&mx){
-        cursize=GET_SIZE(HDRP(bp));
-        printf("ptr:%p size:%d\n",bp,cursize);
-        bp=GETP(NXTP(bp));
-        mx--;
-    }
-    printf("\n");
-}
 static void* find_fit(size_t size){
     if(free_listp==NULL){
         return NULL;
@@ -233,8 +218,7 @@ static void place(void *bp,size_t size,size_t alloc){
 void mm_free(void *bp)
 {
     size_t size=GET_SIZE(HDRP(bp));
-    PUT(HDRP(bp),PACK(size,0));
-    PUT(FTRP(bp),PACK(size,0));
+    place(bp,size,0);
     bp=coalesce(bp);
     insert(bp);
 }
@@ -281,18 +265,43 @@ static void*coalesce(void *bp){
  */
 void *mm_realloc(void *ptr, size_t size)
 {
+    size_t asize;
+    size_t extendsize;
+    void *bp=ptr;
+    size_t cursize=GET_SIZE(HDRP(bp)); 
+    size_t copySize = cursize-DSIZE;//只复制数据
+    place(bp,cursize,0);
+    bp=coalesce(bp);
+    if(size==0){
+        insert(bp);
+        return NULL;
+    }
+    //size按照DSIZE内存对齐
+    if(size<=DSIZE){
+        asize=2*DSIZE;
+    }else{
+        asize=DSIZE*((size+(DSIZE)+(DSIZE-1))/DSIZE);
+    }
+    
+    cursize=GET_SIZE(HDRP(bp));
+    if(cursize>=asize){
+        memcpy(bp,ptr,copySize);
+        if(cursize>asize){
+          place(((char*)bp)+asize,cursize-asize,0);
+          insert(((char*)bp)+asize);
+        }
+        place(bp,asize,1);
+        return bp;
+    }
     void *oldptr = ptr;
     void *newptr;
-    size_t copySize;
-    
     newptr = mm_malloc(size);
     if (newptr == NULL)
       return NULL;
-    copySize = GET_SIZE((HDRP(oldptr)))-DSIZE;//只复制数据
     if (size < copySize)
       copySize = size;
     memcpy(newptr, oldptr, copySize);
-    mm_free(oldptr);
+    mm_free(bp);
     return newptr;
 }
 
