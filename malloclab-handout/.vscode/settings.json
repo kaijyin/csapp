@@ -5,6 +5,7 @@
         "mman.h": "c",
         "errno.h": "c",
         "unistd.h": "c",
-        "stdlib.h": "c"
+        "stdlib.h": "c",
+        "cstdio": "c"
     }
 }
