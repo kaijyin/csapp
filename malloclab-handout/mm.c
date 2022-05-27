@@ -55,8 +55,9 @@ team_t team = {
 
 /*get val or put val at point p*/
 #define GET(p)  (*(unsigned int *)(p))
+#define GETP(p)  (*(char **)(p))
 #define PUT(p,val)  (*(unsigned int *)(p) = (val))
-#define PUTP(p,val)  (*(void **)(p) = (val))
+#define PUTP(p,val)  (*(char **)(p) = (val))
 
 #define GET_SIZE(p) (GET(p) & ~0x7)
 #define GET_ALLOC(p) (GET(p) & 0x1)
@@ -71,7 +72,6 @@ team_t team = {
 #define NEXT_BLKP(bp) ((char*)(bp) + GET_SIZE(((char *)(bp) - WSIZE)))
 #define PREV_BLKP(bp) ((char*)(bp) - GET_SIZE(((char *)(bp) - DSIZE)))
 
-void *heap_listp;
 void *free_listp;
 static void *extend_heap(size_t words);
 
@@ -83,16 +83,16 @@ static void move(void*bp);
 /* 
  * mm_init - initialize the malloc package.
  */
-int mm_init(void){  
-    if((heap_listp=mem_sbrk(4*WSIZE)) == (void *)-1){
+int mm_init(void){
+    void *bp;  
+    if((bp=mem_sbrk(4*WSIZE)) == (void *)-1){
         return -1;
     }
-    PUT(heap_listp,0);
+    PUT(bp,0);
     //添加序言块和结尾快,避免多余的边界检查(边界不会coalesce),相当于哨兵
-    PUT(heap_listp + (1*WSIZE),PACK(DSIZE, 1));
-    PUT(heap_listp + (2*WSIZE),PACK(DSIZE, 1));
-    PUT(heap_listp + (3*WSIZE),PACK(0, 1));
-    heap_listp+=2*(WSIZE);
+    PUT(bp + (1*WSIZE),PACK(DSIZE, 1));
+    PUT(bp + (2*WSIZE),PACK(DSIZE, 1));
+    PUT(bp + (3*WSIZE),PACK(0, 1));
     free_listp=NULL;
     //先预分配空闲块
     if(extend_heap(CHUNKSIZE/WSIZE)==NULL)
@@ -125,28 +125,14 @@ static void insert(void *bp){
         free_listp=bp;
         return ;
     }
-    if(bp<free_listp){
-        PUTP(PRVP(bp),NULL);
-        PUTP(NXTP(bp),free_listp);
-        PUTP(PRVP(free_listp),bp);
-        free_listp=bp;
-        return;
-    }
-    void *pp=free_listp;
-    void *p=NXTP(pp);
-    while(p!=NULL&&p<bp){
-        pp=p;
-        p=NXTP(p);
-    }
-    PUTP(PRVP(bp),pp);
-    PUTP(NXTP(bp),p);
-    if(p!=NULL){
-       PUTP(PRVP(p),bp);
-    }
+    PUTP(PRVP(bp),NULL);
+    PUTP(PRVP(free_listp),bp);
+    PUTP(NXTP(bp),free_listp);
+    free_listp=bp;
 }
 static void move(void *bp){
     if(free_listp==bp){//头部特判
-        free_listp=NXTP(bp);
+        free_listp=GETP(NXTP(bp));
         if(free_listp!=NULL){
            PUTP(PRVP(free_listp),NULL);
         }
@@ -177,6 +163,12 @@ void *mm_malloc(size_t size)
     }
     //找合适的空闲块
     if((bp=find_fit(asize))!=NULL){
+        size_t cursize=GET_SIZE(HDRP(bp));
+        move(bp);
+        if(cursize>asize){
+          place(((char*)bp)+asize,cursize-asize,0);
+          insert(((char*)bp)+asize);
+        }
         place(bp,asize,1);
         return bp;
     }
@@ -184,36 +176,44 @@ void *mm_malloc(size_t size)
     extendsize = MAX(asize,CHUNKSIZE);
     if(( bp = extend_heap(extendsize/WSIZE)) == NULL)
       return NULL;
+    move(bp);
     place(bp,asize,1);
     return bp;
 }
 
-static void* find_fit(size_t size){
-    void *bp=heap_listp;
-    size_t cursize=GET_SIZE(HDRP(bp));
-    size_t alloced=GET_ALLOC(HDRP(bp));
-    while(alloced||cursize<size){
-        bp=NEXT_BLKP(bp);
+static void print_freelist(){
+    void *bp=free_listp;
+    printf("------------------free_list--------------------\n");
+    size_t cursize;
+    int mx=5;
+    while(bp!=NULL&&mx){
         cursize=GET_SIZE(HDRP(bp));
-        alloced=GET_ALLOC(HDRP(bp));
-        if(cursize==0){
-            return NULL;
-        }
+        printf("ptr:%p size:%d\n",bp,cursize);
+        bp=GETP(NXTP(bp));
+        mx--;
     }
-    if(cursize>size){
-        place(((char*)bp)+size,cursize-size,0);
+    printf("\n");
+}
+static void* find_fit(size_t size){
+    if(free_listp==NULL){
+        return NULL;
+    }
+    void *bp=free_listp;
+    size_t cursize;
+    while(bp!=NULL){
+        cursize=GET_SIZE(HDRP(bp));
+        if(cursize>=size){
+            break;
+        }
+        bp=GETP(NXTP(bp));
     }
     return bp;
 }
 //set the free block been placed
 static void place(void *bp,size_t size,size_t alloc){
-      if(alloc){
-        move(bp);
-      }else{
-        insert(bp);
-      }
       PUT(HDRP(bp),PACK(size,alloc));
       PUT(FTRP(bp),PACK(size,alloc));
+    //   print_freelist();
 }
 /*
  * mm_free - Freeing a block does nothing.
@@ -221,8 +221,6 @@ static void place(void *bp,size_t size,size_t alloc){
 void mm_free(void *bp)
 {
     size_t size=GET_SIZE(HDRP(bp));
-
-    // printf("\nfree %p size:%d\n",(char*)bp,size);
     PUT(HDRP(bp),PACK(size,0));
     PUT(FTRP(bp),PACK(size,0));
     bp=coalesce(bp);
@@ -239,8 +237,7 @@ static void*coalesce(void *bp){
     }
     else if(prev_alloc && !next_alloc){
         //从空闲链表中移出next_block
-        PUTP(NXTP(PRVP(next_blkp)),NXTP(next_blkp));
-        PUTP(PRVP((NXTP(next_blkp))),PRVP(next_blkp));
+        move(next_blkp);
 
         size+=GET_SIZE(HDRP(next_blkp));
         PUT(HDRP(bp),PACK(size,0));
@@ -248,8 +245,7 @@ static void*coalesce(void *bp){
     }
     else if(!prev_alloc && next_alloc){
         //从空闲链表中移出pre_block
-        PUTP(NXTP(PRVP(prev_blkp)),NXTP(prev_blkp));
-        PUTP(PRVP((NXTP(prev_blkp))),PRVP(prev_blkp));
+        move(prev_blkp);
         
         size+=GET_SIZE(HDRP(PREV_BLKP(bp)));
         PUT(HDRP(prev_blkp),PACK(size,0));
@@ -257,11 +253,8 @@ static void*coalesce(void *bp){
         bp = prev_blkp;
     }
     else {
-        PUTP(NXTP(PRVP(next_blkp)),NXTP(next_blkp));
-        PUTP(PRVP((NXTP(next_blkp))),PRVP(next_blkp));
-
-        PUTP(NXTP(PRVP(prev_blkp)),NXTP(prev_blkp));
-        PUTP(PRVP((NXTP(prev_blkp))),PRVP(prev_blkp));
+        move(prev_blkp);
+        move(next_blkp);
 
         size+=GET_SIZE(HDRP(PREV_BLKP(bp)))+GET_SIZE(FTRP(NEXT_BLKP(bp)));
         PUT(HDRP(prev_blkp),PACK(size,0));
