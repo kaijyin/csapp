@@ -125,10 +125,22 @@ static void insert(void *bp){
         free_listp=bp;
         return ;
     }
-    PUTP(PRVP(bp),NULL);
-    PUTP(PRVP(free_listp),bp);
-    PUTP(NXTP(bp),free_listp);
-    free_listp=bp;
+    if(bp<free_listp){
+        PUTP(PRVP(bp),NULL);
+        PUTP(NXTP(bp),free_listp);
+        PUTP(PRVP(free_listp),bp);
+        free_listp=bp;
+        return;
+    }
+    void *pp=free_listp;
+    void *p=NXTP(pp);
+    while(p!=NULL){
+        pp=p;
+        p=NXTP(p);
+    }
+    PUTP(PRVP(bp),pp);
+    PUTP(NXTP(bp),p);
+    PUTP(NXTP(pp),bp);
 }
 static void move(void *bp){
     if(free_listp==bp){//头部特判
